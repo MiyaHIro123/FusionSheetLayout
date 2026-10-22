@@ -1,0 +1,12 @@
+# Local execution and one-generation backups
+__pycache__/
+*.py[cod]
+buckup/
+*(バックアップ)*
+logs/
+.vscode/
+.DS_Store
+Thumbs.db
+# Generated cut files and temporary writes
+*.dxf
+.mdf_*.tmp
