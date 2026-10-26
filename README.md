@@ -23,12 +23,12 @@ Windows環境で開発・動作確認しています。macOSでの動作は未�
 
 ### 1. アドインのダウンロード
 
-1. [GitHub Releases（配布ページ）](https://github.com/MiyaHIro123/FusionSheetLayout/releases) を開きます。
-2. インストールするリリースの説明を確認し、**「Assets」** を開きます。
-3. 添付されている配布用ZIP（例：`FusionSheetLayout-v0.1.zip`）をダウンロードします。
-   - `Source code (zip)` や `Source code (tar.gz)` ではなく、リリースに添付された **`FusionSheetLayout-….zip` の配布ファイル**を選んでください。
+1. [GitHub Releases（配布ページ）](https://github.com/MiyaHIro123/FusionSheetLayout/releases) を開く
+2. インストールするリリースの説明を確認し、**「Assets」** を開く
+3. 添付されている配布用ZIP（例：`FusionSheetLayout-v0.1.zip`）をダウンロードする
+   - `Source code (zip)` や `Source code (tar.gz)` ではなく、リリースに添付された **`FusionSheetLayout-….zip` の配布ファイル**
 4. ダウンロードしたZIPを右クリックし、**「すべて展開」** を選びます。
-5. 展開した中の **`FusionSheetLayout` フォルダ**を、ドキュメントなどの削除しない場所に移します。
+5. 展開した中の **`FusionSheetLayout` フォルダ**を、ドキュメントなどの削除しない場所に移動
    - このフォルダの直下に `FusionSheetLayout.py` と `FusionSheetLayout.manifest` があることを確認してください。
    - フォルダ名は `FusionSheetLayout` のままにしてください。
 
