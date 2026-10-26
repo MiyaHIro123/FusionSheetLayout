@@ -23,16 +23,14 @@ Windows環境で開発・動作確認しています。macOSでの動作は未�
 
 ### 1. アドインのダウンロード
 
-1. このGitHubページの上部にある緑色の **「Code」** ボタンをクリック
- 
-  ![alt text](image.png)
-
-3. **「Download ZIP」** をクリックしてファイルをダウンロード
-
-  ![alt text](image-1.png)
-
-4. ダウンロードしたZIPファイルを右クリックから、**「すべて展開」** 
-
+1. [GitHub Releases（配布ページ）](https://github.com/MiyaHIro123/FusionSheetLayout/releases) を開きます。
+2. インストールするリリースの説明を確認し、**「Assets」** を開きます。
+3. 添付されている配布用ZIP（例：`FusionSheetLayout-v0.1.zip`）をダウンロードします。
+   - `Source code (zip)` や `Source code (tar.gz)` ではなく、リリースに添付された **`FusionSheetLayout-….zip` の配布ファイル**を選んでください。
+4. ダウンロードしたZIPを右クリックし、**「すべて展開」** を選びます。
+5. 展開した中の **`FusionSheetLayout` フォルダ**を、ドキュメントなどの削除しない場所に移します。
+   - このフォルダの直下に `FusionSheetLayout.py` と `FusionSheetLayout.manifest` があることを確認してください。
+   - フォルダ名は `FusionSheetLayout` のままにしてください。
 
 参考：フォルダの中身
 ```text
@@ -144,7 +142,12 @@ FusionSheetLayout/
 
 ## 更新方法
 
-Fusionでアドインを停止してから、Gitで更新するか、新しい配布ファイルに入れ替えます。手動で既存ファイルを上書きする際は、各フォルダの `buckup/` に同名の元ファイルを保存してください。更新後はFusionで再実行します。旧版と新版を同時に起動しないでください。
+1. Fusionの「スクリプトとアドイン」で、実行中の `FusionSheetLayout` を停止します。
+2. 現在のアドインフォルダを別の場所にコピーしてバックアップします。
+3. [GitHub Releases](https://github.com/MiyaHIro123/FusionSheetLayout/releases) から新しいリリースの配布用ZIPをダウンロードし、展開します。
+4. 展開した `FusionSheetLayout` フォルダの中身を、現在登録しているアドインフォルダに上書きコピーします。
+   - 設定を引き継ぐため、既存の `settings.json` は削除・上書きせずに残してください。
+5. Fusionでアドインを再実行します。旧版と新版を同時に起動しないでください。
 
 ## 開発資料
 
