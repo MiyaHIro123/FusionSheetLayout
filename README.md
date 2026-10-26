@@ -27,7 +27,7 @@ Windows環境で開発・動作確認しています。macOSでの動作は未�
 2. インストールするリリースの説明を確認し、**「Assets」** を開く
 3. 添付されている配布用ZIP（例：`FusionSheetLayout-v0.1.zip`）をダウンロードする
    - `Source code (zip)` や `Source code (tar.gz)` ではなく、リリースに添付された **`FusionSheetLayout-….zip` の配布ファイル**
-4. ダウンロードしたZIPを右クリックし、**「すべて展開」** を選びます。
+4. ダウンロードしたZIPを右クリックし、**「すべて展開」** を選ぶ
 5. 展開した中の **`FusionSheetLayout` フォルダ**を、ドキュメントなどの削除しない場所に移動
    - このフォルダの直下に `FusionSheetLayout.py` と `FusionSheetLayout.manifest` があることを確認してください。
    - フォルダ名は `FusionSheetLayout` のままにしてください。
