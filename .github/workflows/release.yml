@@ -1,0 +1,38 @@
+
+name: Release Fusion Add-in
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Package add-in
+        run: |
+          mkdir -p dist/FusionSheetLayout
+          cp FusionSheetLayout.py dist/FusionSheetLayout/
+          cp FusionSheetLayout.manifest dist/FusionSheetLayout/
+          cp -r commands lib dist/FusionSheetLayout/
+          cp config.py dist/FusionSheetLayout/
+          if [ -d resources ]; then
+            cp -r resources dist/FusionSheetLayout/
+          fi
+          cd dist
+          zip -r "../FusionSheetLayout-${GITHUB_REF_NAME}.zip" FusionSheetLayout
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "FusionSheetLayout-${GITHUB_REF_NAME}.zip" \
+            --generate-notes \
+            --verify-tag
