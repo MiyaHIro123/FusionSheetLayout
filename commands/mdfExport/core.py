@@ -40,6 +40,14 @@ class Curve:
             return (p[0]+x, p[1]+y)
         return replace(self, start=move(self.start), end=move(self.end), center=move(self.center))
 
+    def rotated(self, angle):
+        """Rigid rotation about the projection origin; preserve analytic curves."""
+        co, si = cos(angle), sin(angle)
+        def rotate(p):
+            return (co*p[0]-si*p[1], si*p[0]+co*p[1])
+        return replace(self, start=rotate(self.start), end=rotate(self.end),
+                       center=rotate(self.center), angle=self.angle+angle)
+
     # 指定角度が円弧の範囲内か判定する。0度をまたぐ区間にも対応する。
     def contains_angle(self, a, tolerance=1e-10):
         if self.kind == 'CIRCLE':
@@ -94,6 +102,29 @@ class Part:
     # 部品の全輪郭をまとめて移動し、配置後の新しい部品データを返す。
     def moved(self, x, y):
         return replace(self, loops=tuple(Loop(l.outer, tuple(c.moved(x, y) for c in l.curves)) for l in self.loops))
+
+    def aligned(self):
+        """Snap the longest straight edge to the nearest horizontal/vertical axis."""
+        longest, length = None, 0.
+        for loop in self.loops:
+            for curve in loop.curves:
+                if curve.kind == 'LINE':
+                    candidate = distance(curve.start, curve.end)
+                    # Keep the first edge on numerical ties (in millimetres).
+                    if candidate > length+1e-9:
+                        longest, length = curve, candidate
+        if longest is None:
+            return self
+        dx = longest.end[0]-longest.start[0]
+        dy = longest.end[1]-longest.start[1]
+        angle = atan2(dy, dx)
+        # Undirected edge angle in [-90, 90); exact 45-degree ties go vertical.
+        angle = (angle+pi/2) % pi-pi/2
+        target = 0. if abs(angle) < pi/4-1e-12 else (pi/2 if angle >= 0 else -pi/2)
+        rotation = target-angle
+        return replace(self, loops=tuple(
+            Loop(loop.outer, tuple(c.rotated(rotation) for c in loop.curves))
+            for loop in self.loops))
 
 
 # 2点間の距離をmmで計算する。端点の接続確認などで使う。
@@ -244,7 +275,7 @@ def validate_part(part):
 
 
 # 棚配置：背の高い部品から左詰めし、指定幅を超える手前で次の行へ進める。
-# 回転・縮尺変更・穴への入れ子配置はしない。幅超過部品は警告して除外する。
+# 最長直線辺を水平・垂直に補正後、縮尺変更や穴への入れ子配置なしで配置する。
 # 最後に矩形同士の間隔を再検査し、配置済み部品・警告・全体寸法を返す。
 def layout(parts, width=600., gap=3.):
     if not all(isfinite(v) for v in (width, gap)) or width <= 0 or gap < 0:
@@ -253,6 +284,7 @@ def layout(parts, width=600., gap=3.):
     warnings = []
     for p in parts:
         validate_part(p)
+        p = p.aligned()
         a, b, c, d = p.bounds()
         w, h = c-a, d-b
         if w > width+1e-8:

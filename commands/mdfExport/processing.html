@@ -1,0 +1,22 @@
+<html lang="ja"><head><meta charset="utf-8">
+<style>
+html,body { margin:0; height:100%; background:#f5f6f8; color:#24282e;
+  font-family:"Segoe UI","Meiryo",sans-serif; }
+body { display:flex; align-items:center; gap:20px; padding:24px;
+  box-sizing:border-box; }
+.spinner { width:32px; height:32px; flex-shrink:0; border:4px solid #dce4ee;
+  border-top-color:#1676d2; border-radius:50%;
+  animation:spin .85s linear infinite; will-change:transform; }
+@keyframes spin { to { transform:rotate(360deg); } }
+strong { font-size:16px; } p { margin:8px 0 0; font-size:12px; line-height:1.6; }
+</style></head><body>
+<div class="spinner" aria-hidden="true"></div>
+<div role="status"><strong>処理中…</strong><p>しばらくお待ちください。</p></div>
+<script>
+// 初回描画を待ってからPythonに通知する。
+window.addEventListener('load', function () {
+  requestAnimationFrame(function () { requestAnimationFrame(function () {
+    if (window.adsk) window.adsk.fusionSendData('processing_ready', '');
+  }); });
+});
+</script></body></html>

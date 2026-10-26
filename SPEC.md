@@ -213,3 +213,17 @@ MDF出力設定に「板厚方向が複数候補でも警告付きで出力す�
 
 板厚範囲外、段差、未対応形状を強制出力する機能ではありません。結果ログには設定のON/OFFと選択理由を記録します。OFF時の除外、ON時の最大板面選択、同面積の決定性、解析一覧への採用、厚さ不一致の除外を追加試験し、全53件が合格しました。実Fusionの動作はユーザー確認待ちです。
 
+
+
+## Orientation alignment (2026-10-26)
+
+Before layout, rotate each 2D projection so its longest straight edge is horizontal
+or vertical, whichever is nearer in the projected coordinate system. An undirected
+angle below 45 degrees from horizontal snaps to horizontal; 45 degrees or above
+snaps to vertical (including exactly 45 degrees). Equal-length edges use the first
+encountered in contour order (numerical tie tolerance: 1e-9 mm). All contours,
+including holes, circles and arcs, rotate together without scaling or reflection.
+Parts without straight edges retain their orientation. Recompute bounding boxes
+after alignment, then apply width checks, shelf layout and spacing checks.
+This supersedes the earlier no-rotation rule; packing adds no further rotation.
+The original Fusion bodies are unchanged. Applies to both DXF and SVG.

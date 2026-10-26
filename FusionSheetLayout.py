@@ -8,7 +8,7 @@ def run(context):
         app = adsk.core.Application.get()
         ui = app.userInterface
 
-        ui.messageBox('アドイン起動成功')
+        
 
         commands.start()
 

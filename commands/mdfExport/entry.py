@@ -1,10 +1,13 @@
 """Fusion buttons: click -> analyze -> Ignore/Cancel warnings -> save DXF."""
+from contextlib import contextmanager
 from datetime import datetime
 from dataclasses import asdict
 from html import escape
 from math import isfinite
 from pathlib import Path
 import json
+import os
+import tempfile
 import re
 import traceback
 import adsk.core
@@ -16,13 +19,80 @@ from .svg_writer import svg_text, validate_svg
 
 COMMAND_ID = 'MiyaHiro_MDFLaser_Export_v01'
 SETTINGS_ID = 'MiyaHiro_MDFLaser_Settings_v01'
-PANEL_ID = 'SolidScriptsAddinsPanel'
+MENU_ID = 'MiyaHiro_MDFLaser_Menu_v01'
+PROCESSING_ID = 'MiyaHiro_MDFLaser_Processing_v01'
+TAB_ID = 'ToolsTab'
+PANEL_ID = 'FusionSheetLayoutPanel'
+PANEL_NAME = 'SHEET LAYOUT'
+LEGACY_PANEL_ID = 'SolidScriptsAddinsPanel'
 WORKSPACE_ID = 'FusionSolidEnvironment'
 ADDIN_DIR = Path(__file__).resolve().parents[2]
+# 既存のツールバー用アイコンを実行ボタンに使用する。
+ICON_FOLDER = str(ADDIN_DIR/'commands'/'commandDialog'/'resources')
 LOG_DIR = ADDIN_DIR/'logs'
-SETTINGS = {'hidden': False, 'tolerance': 0.05, 'gap': 3., 'width': 600., 'format': 'DXF', 'allow_ambiguous': False}
+SETTINGS_FILE = ADDIN_DIR/'settings.json'
+DEFAULT_SETTINGS = {'hidden': False, 'tolerance': 0.05, 'gap': 3.,
+                    'width': 600., 'format': 'SVG', 'allow_ambiguous': True}
+SETTINGS = dict(DEFAULT_SETTINGS)
+
+
+def valid_settings(v):
+    try:
+        return (
+            all(type(v[k]) is bool for k in ('hidden', 'allow_ambiguous'))
+            and v['format'] in ('DXF', 'SVG')
+            and all(type(v[k]) in (int, float) and isfinite(v[k])
+                    for k in ('tolerance', 'gap', 'width'))
+            and 0 < v['tolerance'] <= .25 and v['gap'] >= 0 and v['width'] > 0
+        )
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return False
+
+
+def save_settings(values):
+    if not valid_settings(values):
+        raise ValueError('設定値が不正です')
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8',
+                                         dir=str(SETTINGS_FILE.parent),
+                                         prefix='settings_', suffix='.tmp',
+                                         delete=False) as stream:
+            temporary = Path(stream.name)
+            json.dump(values, stream, ensure_ascii=False, indent=2, allow_nan=False)
+            stream.write('\n')
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(str(temporary), str(SETTINGS_FILE))
+    finally:
+        if temporary is not None and temporary.exists():
+            temporary.unlink()
+
+
+def load_settings():
+    SETTINGS.clear()
+    SETTINGS.update(DEFAULT_SETTINGS)
+    try:
+        raw = json.loads(SETTINGS_FILE.read_text(encoding='utf-8-sig'))
+        if not isinstance(raw, dict):
+            raise ValueError('設定ファイルはJSONオブジェクトである必要があります')
+        values = dict(DEFAULT_SETTINGS)
+        values.update({k: raw[k] for k in DEFAULT_SETTINGS if k in raw})
+        if not valid_settings(values):
+            raise ValueError('設定ファイルに不正な値があります')
+        SETTINGS.update(values)
+    except FileNotFoundError:
+        try:
+            save_settings(SETTINGS)
+        except Exception as exc:
+            fail('初期設定ファイルを保存できませんでした。\n' + str(exc))
+    except Exception as exc:
+        fail('設定ファイルを読み込めないため、今回は初期値を使用します。\n'
+             '既存の設定ファイルは上書きしていません。\n' + str(exc))
+
 _handlers = []
 _commands = []
+_processing_active = False
 
 
 def ui():
@@ -33,10 +103,42 @@ def fail(message):
     ui().messageBox(message, 'MDFレーザーカット出力')
 
 
+# 固定メッセージを表示し、完了・例外時に閉じる。保存先選択中は表示しない。
+@contextmanager
+def processing(document, design):
+    global _processing_active
+    if _processing_active:
+        raise ValueError('処理中...')
+    _processing_active = True
+    progress = None
+    try:
+        try:
+            progress = ui().createProgressDialog()
+            progress.isCancelButtonShown = False
+            progress.isBackgroundTranslucent = False
+            progress.show('Sheet Layout', '処理中...', 0, 1, 0)
+            adsk.doEvents()
+        except Exception:
+            # 表示機能の失敗で本来の解析・保存を中止しない。
+            futil.log('処理中表示を開始できませんでした: ' + traceback.format_exc())
+        if adsk.core.Application.get().activeDocument != document or not design.isValid:
+            raise ValueError('対象のドキュメントが変わりました。もう一度実行してください。')
+        yield
+    finally:
+        try:
+            if progress:
+                try:
+                    progress.hide()
+                except Exception:
+                    futil.log('処理中表示を閉じられませんでした: ' + traceback.format_exc())
+        finally:
+            _processing_active = False
+
+
 # 採用部品、警告、設定、配置寸法を、画面表示と結果ログ用の文章へまとめる。
 def report(result, settings):
     parts, warnings, size, hidden = result
-    lines = [f'出力形式: {settings.get("format", "DXF")}', f'出力対象: {len(parts)}部品 / 警告: {len(warnings)}件 / 非表示除外: {hidden}件',
+    lines = [f'出力形式: {settings.get("format", "SVG")}', f'出力対象: {len(parts)}部品 / 警告: {len(warnings)}件 / 非表示除外: {hidden}件',
              f'配置全体: {size[0]:.3f} × {size[1]:.3f} mm',
              f'板厚: 2.5±{settings["tolerance"]:g} mm / 間隔: {settings["gap"]:g} mm / 配置幅: {settings["width"]:g} mm',
              f'板厚方向の複数候補を警告付きで出力: {"ON" if settings.get("allow_ambiguous", False) else "OFF"}',
@@ -89,12 +191,13 @@ def export_created(args):
             raise ValueError('スケッチ編集を終了してから実行してください。')
         document = app.activeDocument
         settings = dict(SETTINGS)
-        output_format = settings.get('format', 'DXF')
+        output_format = settings.get('format', 'SVG')
         if output_format not in ('DXF', 'SVG'):
             raise ValueError('出力形式が不正です')
         extension = '.'+output_format.lower()
-        result = analyze(design, settings)
-        summary = report(result, settings)
+        with processing(document, design):
+            result = analyze(design, settings)
+            summary = report(result, settings)
         if not result[0]:
             text_input(command, 'mdf_result', '出力できる部品がありません。\n\n'+summary)
             command.isOKButtonVisible = False
@@ -115,7 +218,8 @@ def export_created(args):
                 if app.activeDocument != document or not design.isValid:
                     raise ValueError('対象のドキュメントが変わりました。もう一度ボタンを押してください。')
                 current = analyze(design, settings)
-                if signature(current) != snapshot:
+                current_signature = signature(current)
+                if current_signature != snapshot:
                     raise ValueError('解析後にモデルまたは表示状態が変わりました。もう一度解析してください。')
                 dialog = ui().createFileDialog()
                 dialog.title = 'MDFレーザーカット'+output_format+'の保存'
@@ -168,12 +272,12 @@ def settings_created(args):
     command.okButtonText = '設定を保存'
     handlers = keep_command(command)
     inputs = command.commandInputs
-    text_input(command, 'mdf_help', '設定はFusionのこのアドインの実行中だけ保持します。公称板厚は2.5mmです。', 2)
+    text_input(command, 'mdf_help', '設定はsettings.jsonに保存し、Fusion再起動後も保持します。公称板厚は2.5mmです。', 2)
     format_input = inputs.addDropDownCommandInput('format', '出力形式', adsk.core.DropDownStyles.TextListDropDownStyle)
     for name in ('DXF', 'SVG'):
-        format_input.listItems.add(name, SETTINGS.get('format', 'DXF') == name, '')
+        format_input.listItems.add(name, SETTINGS.get('format', 'SVG') == name, '')
     inputs.addBoolValueInput('hidden', '非表示のボディも含める', True, '', SETTINGS['hidden'])
-    inputs.addBoolValueInput('allow_ambiguous', '板厚方向が複数候補でも警告付きで出力する', True, '', SETTINGS.get('allow_ambiguous', False))
+    inputs.addBoolValueInput('allow_ambiguous', '板厚方向が複数候補でも警告付きで出力する', True, '', SETTINGS.get('allow_ambiguous', True))
     text_input(command, 'ambiguity_help', '有効時は板面積最大の候補を選び、出力前に警告します。「無視」で出力、「キャンセル」で終了します。板厚不一致や段差は対象外のままです。', 3)
     for key, label in [('tolerance', '板厚許容誤差 ±'), ('gap', '部品間隔'), ('width', '配置幅')]:
         inputs.addValueInput(key, label, 'mm', adsk.core.ValueInput.createByString(f'{SETTINGS[key]} mm'))
@@ -184,7 +288,7 @@ def settings_created(args):
                     **{k: inputs.itemById(k).value*10 for k in ('tolerance', 'gap', 'width')})
 
     def valid(v):
-        return v['format'] in ('DXF', 'SVG') and all(isfinite(v[k]) for k in ('tolerance', 'gap', 'width')) and 0 < v['tolerance'] <= .25 and v['gap'] >= 0 and v['width'] > 0
+        return valid_settings(v)
 
     def validate(event_args):
         try:
@@ -193,45 +297,65 @@ def settings_created(args):
             event_args.areInputsValid = False
 
     def execute(event_args):
-        v = values()
-        if valid(v):
+        try:
+            v = values()
+            save_settings(v)
             SETTINGS.update(v)
+        except Exception as exc:
+            fail('設定を保存できませんでした。以前の設定を維持します。\n' + str(exc))
     futil.add_handler(command.validateInputs, validate, local_handlers=handlers)
     futil.add_handler(command.execute, execute, local_handlers=handlers)
 
 
-# Fusionへ実行ボタンと設定ボタンを登録し、イベントを接続する。
+# パネルの主ボタンで実行し、設定はパネルメニューに配置する。
 def start():
+    load_settings()
     interface = ui()
     workspace = interface.workspaces.itemById(WORKSPACE_ID)
-    panel = workspace.toolbarPanels.itemById(PANEL_ID)
+    tab = workspace.toolbarTabs.itemById(TAB_ID) if workspace else None
+    if not tab:
+        raise RuntimeError('ユーティリティタブが見つかりません')
+    stop()
+    panel = tab.toolbarPanels.itemById(PANEL_ID)
     if not panel:
-        raise RuntimeError('デザインのアドインパネルが見つかりません')
-    for cid, name, description, callback, promoted in (
-        (COMMAND_ID, 'MDFレーザーカット出力', '板状ボディを解析し、警告確認後に選択形式（DXF／SVG）で保存します。', export_created, True),
-        (SETTINGS_ID, 'MDF出力設定', '出力形式・板厚許容誤差・間隔・配置幅・非表示対象を設定します。', settings_created, False)):
-        control = panel.controls.itemById(cid)
-        if control:
-            control.deleteMe()
-        definition = interface.commandDefinitions.itemById(cid)
-        if definition:
-            definition.deleteMe()
-        definition = interface.commandDefinitions.addButtonDefinition(cid, name, description)
-        futil.add_handler(definition.commandCreated, callback, local_handlers=_handlers)
-        control = panel.controls.addCommand(definition)
-        control.isPromoted = promoted
-        control.isPromotedByDefault = promoted
+        panel = tab.toolbarPanels.add(PANEL_ID, PANEL_NAME)
+    if not panel:
+        raise RuntimeError('SHEET LAYOUTパネルを作成できません')
+    try:
+        for cid, name, description, callback in (
+            (COMMAND_ID, 'Sheet Layout', '板状ボディを解析し、警告確認後に選択形式（DXF／SVG）で保存します。', export_created),
+            (SETTINGS_ID, '設定', '出力形式・板厚許容誤差・間隔・配置幅・非表示対象を設定します。', settings_created)):
+            definition = interface.commandDefinitions.addButtonDefinition(
+                cid, name, description, ICON_FOLDER if cid == COMMAND_ID else '')
+            futil.add_handler(definition.commandCreated, callback, local_handlers=_handlers)
+            control = panel.controls.addCommand(definition)
+            control.isPromotedByDefault = cid == COMMAND_ID
+            control.isPromoted = cid == COMMAND_ID
+    except Exception:
+        stop()
+        raise
 
 
 # この機能のボタンとイベント参照を解放する。ユーザーのモデルは閉じない。
 def stop():
     interface = ui()
+    palette = interface.palettes.itemById(PROCESSING_ID)
+    if palette:
+        palette.deleteMe()
     workspace = interface.workspaces.itemById(WORKSPACE_ID)
-    panel = workspace.toolbarPanels.itemById(PANEL_ID) if workspace else None
+    if workspace:
+        for panel_id in (PANEL_ID, LEGACY_PANEL_ID):
+            panel = workspace.toolbarPanels.itemById(panel_id)
+            if not panel:
+                continue
+            for cid in (MENU_ID, COMMAND_ID, SETTINGS_ID):
+                control = panel.controls.itemById(cid)
+                if control:
+                    control.deleteMe()
+            # 他のコマンドが残っている間は共有パネルを維持する。
+            if panel_id == PANEL_ID and panel.controls.count == 0:
+                panel.deleteMe()
     for cid in (COMMAND_ID, SETTINGS_ID):
-        control = panel.controls.itemById(cid) if panel else None
-        if control:
-            control.deleteMe()
         definition = interface.commandDefinitions.itemById(cid)
         if definition:
             definition.deleteMe()

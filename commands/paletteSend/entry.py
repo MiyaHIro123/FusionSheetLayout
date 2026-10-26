@@ -42,16 +42,16 @@ def start():
 
     # ******** Add a button into the UI so the user can run the command. ********
     # Get the target workspace the button will be created in.
-    workspace = ui.workspaces.itemById(WORKSPACE_ID)
+    #workspace = ui.workspaces.itemById(WORKSPACE_ID)
 
     # Get the panel the button will be created in.
-    panel = workspace.toolbarPanels.itemById(PANEL_ID)
+    #panel = workspace.toolbarPanels.itemById(PANEL_ID)
 
     # Create the button command control in the UI after the specified existing command.
-    control = panel.controls.addCommand(cmd_def, COMMAND_BESIDE_ID, False)
+    # = panel.controls.addCommand(cmd_def, COMMAND_BESIDE_ID, False)
 
     # Specify if the command is promoted to the main toolbar. 
-    control.isPromoted = IS_PROMOTED
+    #control.isPromoted = IS_PROMOTED
 
 
 # Executed when add-in is stopped.
