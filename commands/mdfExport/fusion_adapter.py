@@ -2,7 +2,8 @@
 from math import sqrt, sin, pi, atan2
 import adsk.core
 import adsk.fusion
-from .core import Curve, Part, EPS, TAU, ordered_loop, validate_part, distance, layout
+from .geometry import Curve, Part, EPS, TAU, ordered_loop, validate_part, distance
+from .results import ExtractionResult
 
 ANGLE = sin(0.01*pi/180)
 CM_EPS = EPS/10
@@ -262,10 +263,10 @@ def extract(body, part_id, name, tolerance, allow_ambiguous=False, notices=None)
     raise Skip('THICKNESS_OUT_OF_RANGE', f'2.5±{tolerance:g}mmの端面がありません。平面間距離(mm): {detail or "取得不可"}')
 
 
-# ルートと各オカレンスのボディを列挙し、表示設定・形状判定・配置を順に行う。
+# ルートと各オカレンスのボディを列挙し、表示設定・形状判定・輪郭抽出を行う。
 # 同一部品の別オカレンスは別数量。プロキシの座標へ変換を二重に適用しない。
-# ボディ単位の失敗は警告へまとめ、配置など全体処理の失敗は呼び出し元へ伝える。
-def analyze(design, settings):
+# ボディ単位の失敗は警告へまとめ、全体処理の失敗は呼び出し元へ伝える。
+def extract_parts(design, settings):
     parts, warnings, hidden = [], [], 0
     root = design.rootComponent
     seq = 0
@@ -312,6 +313,4 @@ def analyze(design, settings):
             meshes(occ.component, name, occ)
         except Exception as exc:
             warnings.append(f'{name}: UNRESOLVED_INSTANCE {exc}')
-    placed, layout_warnings, size = layout(parts, settings['width'], settings['gap'])
-    warnings.extend(layout_warnings)
-    return placed, warnings, size, hidden
+    return ExtractionResult(parts, warnings, hidden)

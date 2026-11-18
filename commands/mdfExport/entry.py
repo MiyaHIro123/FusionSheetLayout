@@ -1,21 +1,17 @@
 """Fusion buttons: click -> analyze -> Ignore/Cancel warnings -> save DXF."""
 from contextlib import contextmanager
 from datetime import datetime
-from dataclasses import asdict
 from html import escape
-from math import isfinite
 from pathlib import Path
-import json
-import os
-import tempfile
 import re
 import traceback
 import adsk.core
 import adsk.fusion
 from ...lib import fusionAddInUtils as futil
-from .fusion_adapter import analyze
-from .core import dxf_text, validate_dxf, safe_write
-from .svg_writer import svg_text, validate_svg
+from .service import analyze, export_file
+from .file_io import safe_write
+from .settings import SETTINGS, valid_settings, save_settings, load_settings
+from .reporting import report, signature
 
 COMMAND_ID = 'MiyaHiro_MDFLaser_Export_v01'
 SETTINGS_ID = 'MiyaHiro_MDFLaser_Settings_v01'
@@ -30,66 +26,6 @@ ADDIN_DIR = Path(__file__).resolve().parents[2]
 # 既存のツールバー用アイコンを実行ボタンに使用する。
 ICON_FOLDER = str(ADDIN_DIR/'commands'/'commandDialog'/'resources')
 LOG_DIR = ADDIN_DIR/'logs'
-SETTINGS_FILE = ADDIN_DIR/'settings.json'
-DEFAULT_SETTINGS = {'hidden': False, 'tolerance': 0.05, 'gap': 3.,
-                    'width': 600., 'format': 'SVG', 'allow_ambiguous': True}
-SETTINGS = dict(DEFAULT_SETTINGS)
-
-
-def valid_settings(v):
-    try:
-        return (
-            all(type(v[k]) is bool for k in ('hidden', 'allow_ambiguous'))
-            and v['format'] in ('DXF', 'SVG')
-            and all(type(v[k]) in (int, float) and isfinite(v[k])
-                    for k in ('tolerance', 'gap', 'width'))
-            and 0 < v['tolerance'] <= .25 and v['gap'] >= 0 and v['width'] > 0
-        )
-    except (KeyError, TypeError, ValueError, OverflowError):
-        return False
-
-
-def save_settings(values):
-    if not valid_settings(values):
-        raise ValueError('設定値が不正です')
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8',
-                                         dir=str(SETTINGS_FILE.parent),
-                                         prefix='settings_', suffix='.tmp',
-                                         delete=False) as stream:
-            temporary = Path(stream.name)
-            json.dump(values, stream, ensure_ascii=False, indent=2, allow_nan=False)
-            stream.write('\n')
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(str(temporary), str(SETTINGS_FILE))
-    finally:
-        if temporary is not None and temporary.exists():
-            temporary.unlink()
-
-
-def load_settings():
-    SETTINGS.clear()
-    SETTINGS.update(DEFAULT_SETTINGS)
-    try:
-        raw = json.loads(SETTINGS_FILE.read_text(encoding='utf-8-sig'))
-        if not isinstance(raw, dict):
-            raise ValueError('設定ファイルはJSONオブジェクトである必要があります')
-        values = dict(DEFAULT_SETTINGS)
-        values.update({k: raw[k] for k in DEFAULT_SETTINGS if k in raw})
-        if not valid_settings(values):
-            raise ValueError('設定ファイルに不正な値があります')
-        SETTINGS.update(values)
-    except FileNotFoundError:
-        try:
-            save_settings(SETTINGS)
-        except Exception as exc:
-            fail('初期設定ファイルを保存できませんでした。\n' + str(exc))
-    except Exception as exc:
-        fail('設定ファイルを読み込めないため、今回は初期値を使用します。\n'
-             '既存の設定ファイルは上書きしていません。\n' + str(exc))
-
 _handlers = []
 _commands = []
 _processing_active = False
@@ -135,27 +71,6 @@ def processing(document, design):
             _processing_active = False
 
 
-# 採用部品、警告、設定、配置寸法を、画面表示と結果ログ用の文章へまとめる。
-def report(result, settings):
-    parts, warnings, size, hidden = result
-    lines = [f'出力形式: {settings.get("format", "SVG")}', f'出力対象: {len(parts)}部品 / 警告: {len(warnings)}件 / 非表示除外: {hidden}件',
-             f'配置全体: {size[0]:.3f} × {size[1]:.3f} mm',
-             f'板厚: 2.5±{settings["tolerance"]:g} mm / 間隔: {settings["gap"]:g} mm / 配置幅: {settings["width"]:g} mm',
-             f'板厚方向の複数候補を警告付きで出力: {"ON" if settings.get("allow_ambiguous", False) else "OFF"}',
-             '', '【警告・スキップ】']
-    lines.extend(warnings or ['なし'])
-    lines += ['', '【出力部品】']
-    for p in parts:
-        x0, y0, x1, y1 = p.bounds()
-        lines.append(f'{p.id} {p.name} | 厚さ{p.thickness:.4f}mm | {x1-x0:.3f}×{y1-y0:.3f}mm | 穴{sum(not l.outer for l in p.loops)}')
-    return '\n'.join(lines)
-
-
-# 解析結果を比較できる文字列にし、確認中にモデルが変わった場合の出力を防ぐ。
-def signature(result):
-    return json.dumps(([asdict(p) for p in result[0]], result[1:]), sort_keys=True, ensure_ascii=False)
-
-
 def text_input(command, name, text, rows=20):
     box = command.commandInputs.addTextBoxCommandInput(name, '', escape(text).replace('\n', '<br>'), rows, True)
     box.isFullWidth = True
@@ -198,11 +113,11 @@ def export_created(args):
         with processing(document, design):
             result = analyze(design, settings)
             summary = report(result, settings)
-        if not result[0]:
+        if not result.parts:
             text_input(command, 'mdf_result', '出力できる部品がありません。\n\n'+summary)
             command.isOKButtonVisible = False
             return
-        if result[1]:
+        if result.warnings:
             command.setDialogInitialSize(740, 580)
             text_input(command, 'mdf_warnings',
                        '警告を確認してください。\n「無視」: 下の出力部品を保存します。設定で許可した板厚方向の複数候補も含みます。\n'
@@ -243,10 +158,8 @@ def export_created(args):
                 latest = analyze(design, settings)
                 if signature(latest) != snapshot:
                     raise ValueError('モデルが変わったため出力を中止しました。もう一度解析してください。')
-                parts = latest[0]
-                writer, validator = (svg_text, validate_svg) if output_format == 'SVG' else (dxf_text, validate_dxf)
-                content = writer(parts)
-                safe_write(path, content, lambda data: validator(data, parts))
+                parts = latest.parts
+                export_file(path, parts, output_format)
                 report_note = ''
                 try:
                     details = f'作成日時: {datetime.now().isoformat(timespec="seconds")}\nFusion: {app.version}\n{output_format}: {path}\n\n'+summary
@@ -256,7 +169,7 @@ def export_created(args):
                     report_note = '\n結果一覧: '+str(report_path)
                 except Exception as exc:
                     report_note = f'\n{output_format}は保存済みですが、結果一覧の保存に失敗しました: '+str(exc)
-                fail(f'{output_format}を保存しました。\n{len(parts)}部品 / {latest[2][0]:.3f} × {latest[2][1]:.3f} mm\n{path}'+report_note)
+                fail(f'{output_format}を保存しました。\n{len(parts)}部品 / {latest.size[0]:.3f} × {latest.size[1]:.3f} mm\n{path}'+report_note)
             except Exception:
                 fail('処理を完了できませんでした。\n元モデルは変更していません。\n\n'+traceback.format_exc())
         futil.add_handler(command.execute, execute, local_handlers=handlers)
@@ -309,7 +222,7 @@ def settings_created(args):
 
 # パネルの主ボタンで実行し、設定はパネルメニューに配置する。
 def start():
-    load_settings()
+    load_settings(on_error=fail)
     interface = ui()
     workspace = interface.workspaces.itemById(WORKSPACE_ID)
     tab = workspace.toolbarTabs.itemById(TAB_ID) if workspace else None

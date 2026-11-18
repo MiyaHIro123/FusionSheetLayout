@@ -1,7 +1,7 @@
 """Exact line/arc/circle SVG export in millimetres; independent of Fusion."""
 import math
 import xml.etree.ElementTree as ET
-from .core import EPS, validate_part
+from .geometry import EPS, validate_part
 
 NS = 'http://www.w3.org/2000/svg'
 
